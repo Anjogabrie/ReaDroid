@@ -1,0 +1,2 @@
+# O núcleo do ReaDroid usa apenas a biblioteca padrão do Python.
+# JADX e Apktool são dependências externas opcionais instaladas via pkg no Termux.
