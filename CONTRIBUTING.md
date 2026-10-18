@@ -1,12 +1,12 @@
-# Contribuindo com o ReaDroid
+# Contributing to ReaDroid
 
-Obrigado por ajudar! Para mudanças pequenas, abra uma issue descrevendo o problema antes de enviar um pull request.
+Thank you for contributing! For small changes, please open an issue describing the problem before submitting a pull request.
 
-- Mantenha o núcleo sem dependências Python externas quando possível.
-- Não adicione telemetria nem upload automático de APKs.
-- Trate APKs como entrada não confiável e evite executar seu conteúdo.
-- Ao imprimir qualquer string vinda de dentro de um APK (nomes, strings, saída de ferramentas),
-  use `app.sanitize()` antes - isso remove sequências de escape ANSI e caracteres de controle.
-- Prefira comentários claros em português e nomes de função que expliquem a intenção.
-- Rode `python -m unittest discover -s tests -v` antes de enviar alterações.
-- Informe aparelho, versão do Android, arquitetura, versão do Termux e ferramentas externas ao relatar problemas.
+- Keep the core free of external Python dependencies whenever possible.
+- Do not add telemetry or automatic APK uploads.
+- Treat APKs as untrusted input and avoid executing their contents.
+- When printing any string originating from an APK (names, strings, tool output),
+  use `app.sanitize()` first — this removes ANSI escape sequences and control characters.
+- Prefer clear comments and intention-revealing function names.
+- Run `python -m unittest discover -s tests -v` before submitting changes.
+- Provide device model, Android version, CPU architecture, Termux version, and external tool versions when reporting issues.
