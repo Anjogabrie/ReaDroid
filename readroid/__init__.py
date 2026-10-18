@@ -1,2 +1,2 @@
-"""ReaDroid: toolkit de análise estática de APKs para Termux."""
-__version__ = "0.2.0"
+"""ReaDroid: toolkit de análise estática e reconstrução de APKs para Termux."""
+__version__ = "0.3.1"

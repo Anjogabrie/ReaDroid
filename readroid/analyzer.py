@@ -13,13 +13,25 @@ from pathlib import Path
 from typing import Any
 import xml.etree.ElementTree as ET
 
+from . import __version__, axml
+
 MAX_ENTRY_BYTES = 64 * 1024 * 1024
 MAX_TOTAL_SCAN_BYTES = 256 * 1024 * 1024
 MAX_REPORT_ITEMS = 3000
 
 URL_RE = re.compile(rb"https?://[^\s\x00\"'<>]{4,500}", re.I)
-DOMAIN_RE = re.compile(rb"(?i)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
+# Lista de TLDs reais (não "qualquer coisa.palavra"), senão nomes de classe Java/Kotlin
+# e nomes de arquivo viram "domínio" por acidente (ex.: classes.dex, gate.php).
+_TLDS = (rb"com|net|org|io|dev|app|gov|edu|mil|info|biz|name|pro|xyz|top|online|site|club|vip|link|click|"
+        rb"shop|store|live|icu|buzz|cyou|work|space|tech|cc|ws|pw|su|me|co|ai|br|ru|cn|tk|ml|ga|cf|gq|"
+        rb"onion|duckdns|ngrok")
+DOMAIN_RE = re.compile(rb"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:" + _TLDS + rb")\b")
 IPV4_RE = re.compile(rb"(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9.])")
+# Prefixos de pacotes Android/Java/Kotlin que combinam com a forma de um domínio
+# ("android.content.pm") mas nunca são um - filtrados antes de entrar no relatório.
+_NOT_DOMAIN_PREFIXES = (b"android.", b"androidx.", b"java.", b"javax.", b"kotlin.", b"kotlinx.", b"dalvik.",
+                        b"com.android.", b"com.google.android.", b"org.apache.", b"org.json.", b"org.w3c.",
+                        b"org.xml.", b"sun.", b"libcore.")
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
 A = "{" + ANDROID_NS + "}"
@@ -50,15 +62,24 @@ def _run(command: list[str], timeout: int = 180) -> dict[str, Any]:
         return {"returncode": None, "stdout": "", "stderr": str(exc)}
 
 
+# Extensões que normalmente guardam um ZIP/APK válido. Não é mais um bloqueio rígido:
+# o que importa é o conteúdo (zipfile.is_zipfile), a extensão só gera um aviso.
+KNOWN_APK_EXTENSIONS = (".apk", ".apks", ".xapk", ".apk.1")
+
+
 def validate_apk(path: Path) -> None:
     if not path.exists() or not path.is_file():
         raise ValueError("O caminho não aponta para um arquivo existente.")
-    if path.suffix.lower() != ".apk":
-        raise ValueError("Selecione um arquivo com extensão .apk.")
     if path.stat().st_size == 0:
         raise ValueError("O arquivo está vazio.")
     if not zipfile.is_zipfile(path):
-        raise ValueError("O arquivo não parece ser um APK/ZIP válido.")
+        raise ValueError("O arquivo não parece ser um APK/ZIP válido (não é um ZIP).")
+
+
+def extension_warning(path: Path) -> str | None:
+    if path.suffix.lower() not in KNOWN_APK_EXTENSIONS:
+        return f"Extensão incomum para APK ({path.suffix or 'sem extensão'}); analisando pelo conteúdo mesmo assim."
+    return None
 
 
 def inspect_apk(path: Path) -> dict[str, Any]:
@@ -78,8 +99,9 @@ def inspect_apk(path: Path) -> dict[str, Any]:
                 manifest_kind = "XML texto" if content.lstrip().startswith(b"<") else "XML binário Android (AXML)"
             except (OSError, RuntimeError, zipfile.BadZipFile):
                 manifest_kind = "não foi possível ler"
+        warning = extension_warning(path)
         return {
-            "tool": "ReaDroid", "version": "0.1.0",
+            "tool": "ReaDroid", "version": __version__,
             "analyzed_at_utc": datetime.now(timezone.utc).isoformat(),
             "file_name": path.name, "file_size_bytes": path.stat().st_size,
             "sha256": sha256_file(path), "zip_entry_count": len(infos),
@@ -87,6 +109,7 @@ def inspect_apk(path: Path) -> dict[str, Any]:
             "dex_files": dex_files, "native_libraries": native_libs,
             "resource_file_count": resource_count, "asset_file_count": asset_count,
             "file_list_sample": names[:500],
+            "warnings": [warning] if warning else [],
             "note": "Inspeção estática; a presença de um arquivo não prova comportamento malicioso."
         }
 
@@ -147,8 +170,16 @@ def analyze_manifest(path: Path, output_dir: Path) -> dict[str, Any]:
     if _looks_like_text_xml(manifest_data):
         parsed = _parse_manifest_xml(manifest_data)
     else:
-        parsed = {"decoded": False, "permissions": [], "components": [],
-                  "reason": "O manifesto está no formato binário AXML; será necessário um decodificador compatível."}
+        # Praticamente todo APK real cai aqui: o manifesto é binário (AXML).
+        # Decodificamos nativamente primeiro; só recorremos a JADX/Apktool/aapt2
+        # se o nosso parser falhar (manifesto corrompido de propósito, por exemplo).
+        try:
+            events = axml.parse_events(manifest_data)
+            parsed = axml.to_manifest_dict(events)
+            parsed["decoded_by"] = "readroid (leitor AXML nativo)"
+        except axml.AxmlError as exc:
+            parsed = {"decoded": False, "permissions": [], "components": [],
+                      "reason": f"Falha ao decodificar o AXML nativamente ({exc}); tentando ferramentas externas."}
 
     tools: dict[str, Any] = {}
     # JADX pode exportar o manifesto decodificado junto dos recursos. A saída é tratada como dado, não como comando.
@@ -197,8 +228,19 @@ def analyze_manifest(path: Path, output_dir: Path) -> dict[str, Any]:
 def scan_strings(path: Path) -> dict[str, Any]:
     validate_apk(path)
     found: dict[str, set[str]] = {"urls": set(), "domains": set(), "ipv4_candidates": set()}
+    truncated: set[str] = set()  # categorias que bateram no limite (o relatório pode estar incompleto)
     scanned = 0
     skipped_large = 0
+
+    def add(category: str, value: str) -> None:
+        bucket = found[category]
+        if value in bucket:
+            return
+        if len(bucket) >= MAX_REPORT_ITEMS:
+            truncated.add(category)
+            return
+        bucket.add(value)
+
     with zipfile.ZipFile(path) as archive:
         for info in archive.infolist():
             if info.is_dir():
@@ -221,24 +263,30 @@ def scan_strings(path: Path) -> dict[str, Any]:
             remaining = MAX_TOTAL_SCAN_BYTES - scanned
             data = data[:remaining]
             scanned += len(data)
-            found["urls"].update(item.decode("utf-8", "replace") for item in URL_RE.findall(data))
-            found["domains"].update(item.decode("ascii", "replace").lower() for item in DOMAIN_RE.findall(data))
+            for item in URL_RE.findall(data):
+                add("urls", item.decode("utf-8", "replace"))
+            for item in DOMAIN_RE.findall(data):
+                low = item.lower()
+                if low.startswith(_NOT_DOMAIN_PREFIXES):
+                    continue
+                add("domains", low.decode("ascii", "replace"))
             for raw in IPV4_RE.findall(data):
                 candidate = raw.decode("ascii", "replace")
                 try:
                     ipaddress.IPv4Address(candidate)
-                    found["ipv4_candidates"].add(candidate)
+                    add("ipv4_candidates", candidate)
                 except ipaddress.AddressValueError:
                     pass
-            if all(len(items) >= MAX_REPORT_ITEMS for items in found.values()):
-                break
     return {
         "tool": "ReaDroid", "apk": path.name, "sha256": sha256_file(path),
         "bytes_scanned": scanned, "large_entries_skipped": skipped_large,
-        "urls": sorted(found["urls"])[:MAX_REPORT_ITEMS],
-        "domains": sorted(found["domains"])[:MAX_REPORT_ITEMS],
-        "ipv4_candidates": sorted(found["ipv4_candidates"])[:MAX_REPORT_ITEMS],
-        "note": "São correspondências textuais, não confirmação de conexões ou atividade maliciosa. Domínios podem ser nomes de bibliotecas, documentação ou exemplos."
+        "urls": sorted(found["urls"]),
+        "domains": sorted(found["domains"]),
+        "ipv4_candidates": sorted(found["ipv4_candidates"]),
+        "truncated_categories": sorted(truncated),
+        "note": "São correspondências textuais, não confirmação de conexões ou atividade maliciosa. "
+                "Domínios podem ser nomes de bibliotecas, documentação ou exemplos. Categorias em "
+                "'truncated_categories' bateram no limite de itens e podem estar incompletas."
     }
 
 

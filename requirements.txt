@@ -1,2 +1,10 @@
-# O núcleo do ReaDroid usa apenas a biblioteca padrão do Python.
-# JADX e Apktool são dependências externas opcionais instaladas via pkg no Termux.
+# O núcleo do ReaDroid (incluindo o leitor de manifesto AXML) usa apenas a
+# biblioteca padrão do Python. Nada aqui precisa de pip install.
+#
+# Dependências externas, todas OPCIONAIS e instaladas via pkg no Termux:
+#   pkg install openjdk-21 jadx apktool aapt apksigner
+# - openjdk-21 : necessário para jadx, apktool e para gerar/assinar a keystore
+# - jadx       : decompilação para Java aproximado (menu 4)
+# - apktool    : extração de smali/recursos e reconstrução do APK (menus 5 e 11)
+# - aapt       : inclui o zipalign, usado no alinhamento (menu 11)
+# - apksigner  : assinatura v1+v2+v3 (menu 11); sem ele, cai para jarsigner (só v1)
