@@ -64,6 +64,13 @@ termux-setup-storage
 
 Example path: `~/storage/shared/Download/app.apk`.
 
+### Desktop Linux (experimental)
+
+On a Debian/Ubuntu, Fedora or Arch machine, `bash install-linux.sh`
+prepares the same folders and offers the system packages
+(`python3`, Java, `jadx`/`apktool`/`aapt`/`apksigner` where available),
+then run `python3 readroid.py`. Tested on Debian with system apktool/jadx.
+
 ## Usage
 
 1. Run `python readroid.py`.
