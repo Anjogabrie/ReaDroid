@@ -48,3 +48,22 @@
   `Lcom/package/Class;` format). This is best-effort — reflection, dynamically assembled strings, or heavy
   obfuscation may not be replaced, so ReaDroid prompts you to test the rebuilt APK before
   relying on it. Similar package names (e.g., `com.x.app` vs `com.x.app2`) are not conflated.
+
+## 0.4.0
+- **New solid-block "ReaDroid" banner** (adapts to terminal width; compact fallback on very narrow screens).
+- **Optional AI assistant (new menu option 13)** via opencode + OpenRouter, in a separate module
+  (`readroid/ai.py`). The core never imports it: ignore it, or delete the file and the option disappears.
+- **One-step setup:** paste the OpenRouter API key; ReaDroid saves it outside the project (`~/.readroid`, mode 600),
+  generates the opencode config for a free Nemotron model and runs a connection test.
+- **Fixed the "opencode opens but AI doesn't answer" case:** opencode is now always launched inside the APK folder
+  with config and key passed by environment variable, instead of depending on the current directory.
+  Opening it in the home folder is refused.
+- Diagnostics split the problem: direct OpenRouter test (key/model) vs. opencode test.
+- Model switcher lists free Nemotron models from the OpenRouter catalog.
+- `opencode` added to the dependency check (option 6).
+- AI menu: **cross-check JSON reports with the code**, **edit → rebuild → fix-errors loop** (backup first, max 3 attempts,
+  confirmation before each AI correction, list of files changed) and free-form questions.
+- Default model is now `nvidia/nemotron-3.5-lightning:free`. If a free model is withdrawn, ReaDroid detects it and switches
+  to another `:free` Nemotron automatically (never to a paid one) and retries.
+- Pasted paths are cleaned of invisible terminal characters; "not found" messages show the path ReaDroid actually read.
+

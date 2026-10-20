@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import __version__
+from .banner import render as render_banner
 from .analyzer import (analyze_manifest, decompile_with_jadx, extension_warning, extract_smali_with_apktool,
                        inspect_apk, scan_strings, write_report)
 from .builder import (DEFAULT_ALIAS, DEFAULT_STOREPASS, QUICK_EDITS, apply_quick_edits, build_pipeline,
@@ -45,14 +46,21 @@ def width() -> int:
 
 def banner() -> None:
     clear()
-    inner = min(width() - 2, 42)
-    title = f" ReaDroid v{__version__}"
-    subtitle = " Sem IA · Sem root · 100% offline"
-    print(GREEN + "╭" + "─" * inner + "╮" + RESET)
-    print(GREEN + "│" + RESET + BOLD + title.ljust(inner) + RESET + GREEN + "│" + RESET)
-    print(GREEN + "│" + RESET + CYAN + subtitle.ljust(inner) + RESET + GREEN + "│" + RESET)
-    print(GREEN + "╰" + "─" * inner + "╯" + RESET)
-    print((" " * max(inner - 10, 0)) + DIM + "OffensiveTec" + RESET)
+    cols = width()
+    for line in render_banner(cols, (GREEN, CYAN, RESET)):
+        print(line)
+    print(BOLD + f"v{__version__}" + RESET + CYAN + " · IA opcional · Sem root · Offline por padrão" + RESET)
+    print(DIM + "OffensiveTec" + RESET)
+
+
+_PASTE_RE = re.compile(r"\x1b\[[0-9;?]*[~a-zA-Z]|\[20[01]~|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"
+                       r"|[\u200b-\u200f\u202a-\u202e\u2060\ufeff]")
+
+
+def clean_path(raw: str) -> str:
+    """Limpa o caminho digitado/colado: remove sequências de 'colar' do terminal (ESC[200~),
+    caracteres invisíveis, espaços e aspas nas pontas. Colar no Termux às vezes traz lixo invisível."""
+    return _PASTE_RE.sub("", raw).strip().strip('"').strip("'").strip()
 
 
 def safe_input(prompt: str = "") -> str:
@@ -104,7 +112,7 @@ def ask_apk() -> Path | None:
                 return candidates[int(choice) - 1]
             except (ValueError, IndexError):
                 print(YELLOW + "Seleção não reconhecida; informe o caminho manualmente." + RESET)
-    raw = safe_input("Caminho completo do APK: ").strip().strip('"').strip("'")
+    raw = clean_path(safe_input("Caminho completo do APK: "))
     if not raw:
         print(YELLOW + "Nenhum arquivo informado." + RESET)
         return None
@@ -113,6 +121,7 @@ def ask_apk() -> Path | None:
         path = Path.cwd() / path
     if not path.exists() or not path.is_file():
         print(RED + "Arquivo não encontrado. Dica: execute termux-setup-storage e use ~/storage/shared/Download/app.apk" + RESET)
+        print(DIM + f"Caminho lido pelo ReaDroid: {str(path)!r}" + RESET)
         return None
     warning = extension_warning(path)
     if warning:
@@ -136,12 +145,13 @@ def ask_decoded_dir() -> Path | None:
                 return candidates[int(choice) - 1]
             except (ValueError, IndexError):
                 print(YELLOW + "Seleção não reconhecida; informe o caminho manualmente." + RESET)
-    raw = safe_input("Caminho da pasta decodificada (saída do Apktool): ").strip().strip('"').strip("'")
+    raw = clean_path(safe_input("Caminho da pasta decodificada (saída do Apktool): "))
     if not raw:
         return None
     path = Path(raw).expanduser()
     if not path.is_dir():
         print(RED + "Pasta não encontrada." + RESET)
+        print(DIM + f"Caminho lido pelo ReaDroid: {str(path)!r}" + RESET)
         return None
     return path
 
@@ -182,7 +192,7 @@ def run_action(title: str, action: Callable[[Path], dict]) -> None:
 
 def dependencies() -> None:
     print(CYAN + "\nVERIFICAÇÃO DE DEPENDÊNCIAS" + RESET)
-    for name in ("python", "java", "jadx", "apktool", "aapt", "aapt2", "zipalign", "apksigner", "keytool", "unzip", "git"):
+    for name in ("python", "java", "jadx", "apktool", "aapt", "aapt2", "zipalign", "apksigner", "keytool", "unzip", "git", "opencode"):
         path = shutil.which(name)
         print(f"[{GREEN + 'OK' + RESET if path else YELLOW + '--' + RESET}] {name}: {path or 'não encontrado'}")
     if shutil.which("java"):
@@ -486,9 +496,26 @@ MENU = [
 ]
 
 
+def ai_available() -> bool:
+    """A IA é um módulo à parte: se readroid/ai.py for apagado, o menu 13 some e nada quebra."""
+    try:
+        from . import ai  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def ai_assistant() -> None:
+    import sys
+    from . import ai
+    ai.run_menu(sys.modules[__name__])
+
+
 def print_menu() -> None:
     for key, label in MENU:
         print(f" [{key}] {label}")
+    if ai_available():
+        print(f" [13] Assistente IA {DIM}(opcional){RESET}")
     print(" [0] Sair")
 
 
@@ -547,6 +574,8 @@ def main() -> None:
             rebuild_and_sign()
         elif choice == "12":
             keystore_menu()
+        elif choice == "13" and ai_available():
+            ai_assistant()
         elif choice in ("0", ""):
             print(GREEN + "Até a próxima. ReaDroid encerrado." + RESET)
             break

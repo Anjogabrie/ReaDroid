@@ -1,6 +1,6 @@
 # ReaDroid
 
-**Android Reverse Engineering Toolkit** — static analysis and APK rebuilding for Android 12–16, designed to run on Termux without root and without AI.
+**Android Reverse Engineering Toolkit** — static analysis and APK rebuilding for Android 12–16, designed to run on Termux without root. The AI assistant is **optional**: ReaDroid works fully without it.
 
 > **OffensiveTec** is a subtle watermark in the terminal interface.
 
@@ -99,6 +99,34 @@ without a v2 signature. Install `pkg install apksigner` for full signing support
 changes the original developer identity — the output will not replace the app store version, and redistributing
 someone else's modified APK without permission may violate their license. See `SECURITY.md`.
 
+## Optional AI Assistant (option 13)
+
+ReaDroid never needs AI. The assistant lives in a separate module (`readroid/ai.py`); if you do not want it,
+just ignore option 13 — or delete that file and the option disappears.
+
+**Setup is one step:** open option 13, paste your OpenRouter API key, done. ReaDroid then:
+
+- stores the key in `~/.readroid/openrouter.key` (permission 600, **outside the project**, so it can't be committed);
+- generates an `opencode.json` pointing to OpenRouter with a free NVIDIA Nemotron model
+  (default `nvidia/nemotron-3.5-lightning:free`; if a free model goes away, ReaDroid switches to another `:free` one by itself, never to a paid one; you can also pick one in the menu);
+- tests the key/model directly against the OpenRouter API, then tests opencode itself.
+
+**Works from any folder.** ReaDroid always starts opencode inside the decoded APK folder
+(`output/<app>_apktool`), passing the config (`OPENCODE_CONFIG`) and key (`OPENROUTER_API_KEY`) by environment
+variable. You no longer need to `cd` into a specific folder first, and it refuses to open opencode in your home folder.
+
+Menu: open the assistant interactively, summarize the app, **cross-check ReaDroid's JSON reports
+(permissions, URLs, domains, IPs) against the code**, **edit with the AI and rebuild in a loop**, explain a rebuild
+error, ask a free-form question, test/diagnose, switch model/key, or disable (deletes key and config).
+
+**Edit → rebuild loop (option 4):** a backup of the decoded folder is made first (`builds/_backup_*`). The AI edits
+only inside that folder, ReaDroid rebuilds/aligns/signs, and on failure (with your confirmation each time, up to 3
+attempts) the build error is sent back to the AI. ReaDroid lists which files the AI changed.
+
+**Privacy:** free models may log prompts, and everything the AI reads (code, strings, manifest) is sent over the
+internet. Use only on your own APKs or ones you are authorized to analyze. AI output shown by ReaDroid is sanitized
+against terminal escape sequences; the interactive opencode screen is drawn by opencode itself.
+
 ## Important Limitations
 
 - ReaDroid performs static analysis. It does not execute the APK or monitor its runtime behavior.
@@ -115,7 +143,7 @@ someone else's modified APK without permission may violate their license. See `S
 
 ## Security and Responsible Use
 
-Analyze only your own applications, test apps, or those you have explicit permission to inspect. APKs are untrusted files; avoid executing them. The tool invokes JADX/Apktool/zipalign/apksigner with separate arguments (without shell interpretation) and does not transmit APKs over the internet. Tool outputs are saved locally. See `SECURITY.md` for specific guidelines regarding rebuilding and signing.
+Analyze only your own applications, test apps, or those you have explicit permission to inspect. APKs are untrusted files; avoid executing them. The tool invokes JADX/Apktool/zipalign/apksigner with separate arguments (without shell interpretation) and does not transmit APKs over the internet (the optional AI assistant sends the file contents you ask it to read to OpenRouter; it is off until you configure it). Tool outputs are saved locally. See `SECURITY.md` for specific guidelines regarding rebuilding and signing.
 
 ## Testing
 
