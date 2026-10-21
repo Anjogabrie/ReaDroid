@@ -77,7 +77,10 @@ def validate_apk(path: Path) -> None:
 
 
 def extension_warning(path: Path) -> str | None:
-    if path.suffix.lower() not in KNOWN_APK_EXTENSIONS:
+    # Comparamos o nome inteiro porque path.suffix só devolve o último trecho:
+    # em "app.apk.1" ele seria ".1", gerando um aviso falso para um download
+    # repetido do navegador, que já está na lista de extensões conhecidas.
+    if not path.name.lower().endswith(KNOWN_APK_EXTENSIONS):
         return f"Extensão incomum para APK ({path.suffix or 'sem extensão'}); analisando pelo conteúdo mesmo assim."
     return None
 
