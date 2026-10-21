@@ -21,14 +21,16 @@ if [ -z "$PM" ]; then
 fi
 
 echo "ReaDroid - configuração para desktop Linux (gerenciador: $PM)"
-echo "Núcleo: só Python 3 stdlib. Opcionais: Java + jadx (decompile), apktool + aapt/zipalign (smali/recursos), apksigner (rebuild assinado)."
+echo "Instala a base: Python 3, Java (para jadx/apktool), unzip, git."
+echo "Opcionais ficam com você (pacotes da distro): jadx, apktool, aapt (traz zipalign), apksigner."
 read -r -p "Instalar/atualizar pacotes com $PM? [s/N] " answer
 case "$answer" in
   s|S|sim|SIM)
     case "$PM" in
       apt-get) sudo apt-get update && sudo apt-get install -y python3 default-jre-headless unzip git ;;
       dnf) sudo dnf install -y python3 java-17-openjdk-headless unzip git ;;
-      pacman) sudo pacman -Sy --needed --noconfirm python jdk-openjdk unzip git ;;
+      # Arch: -Syu (upgrade completo) em vez de -Sy sozinho, que causa partial upgrade.
+      pacman) sudo pacman -Syu --needed --noconfirm python jdk-openjdk unzip git ;;
     esac
     echo "(jadx/apktool/aapt/apksigner: instale pelos pacotes da sua distro ou veja o README original)"
     ;;
@@ -36,6 +38,22 @@ case "$answer" in
 esac
 
 mkdir -p "$SCRIPT_DIR/reports" "$SCRIPT_DIR/output" "$SCRIPT_DIR/builds"
+
+echo ""
+echo "Verificação (base + opcionais):"
+for cmd in python3 java unzip git jadx apktool aapt zipalign apksigner; do
+  if command -v "$cmd" >/dev/null 2>&1; then
+    case "$cmd" in
+      python3) ver=$("$cmd" --version 2>&1) ;;
+      java) ver=$(java -version 2>&1 | head -n 1) ;;
+      *) ver=$("$cmd" --version 2>/dev/null | head -n 1 || true); [ -n "$ver" ] || ver="presente (sem --version)" ;;
+    esac
+    echo "  [ok] $cmd — $ver"
+  else
+    echo "  [--] $cmd ausente (opcional; veja o README para instalar)"
+  fi
+done
+
 cat <<MSG
 
 Estrutura preparada em: $SCRIPT_DIR
