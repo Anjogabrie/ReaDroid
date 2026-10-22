@@ -587,7 +587,7 @@ def _menu_items(compact: bool = False) -> list[str]:
         keys.append("13")
     keys.extend(["14", "0"])
     return [
-        f"{key}:{labels[key]}"
+        f"{key}:{tr(labels[key])}"
         for key in keys
         if key != "13" or ai_available()
     ]

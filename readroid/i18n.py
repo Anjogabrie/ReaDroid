@@ -126,6 +126,12 @@ def load_language() -> str:
 
 _language = load_language()
 
+# compact menu labels v1
+TRANSLATIONS["en"].update({"Inspec. APK":"APK scan","Decompilar":"Decompile","Extrair smali":"Smali","Dependencias":"Deps","Relatorios":"Reports","Resultados":"Results","Ver arquivos":"Files","Edicoes":"Edits","Assinar APK":"Sign APK","Chave APK":"APK key","Assistente IA":"AI","Idioma":"Lang","Sair":"Exit"})
+
+TRANSLATIONS.setdefault("ar", {}).update({"Inspec. APK":"APK","Decompilar":"تفكيك","Extrair smali":"Smali","Dependencias":"تبعيات","Relatorios":"تقارير","Resultados":"نتائج","Ver arquivos":"ملفات","Edicoes":"تعديل","Assinar APK":"توقيع","Chave APK":"مفتاح","Assistente IA":"AI","Idioma":"لغة","Sair":"خروج"})
+TRANSLATIONS.setdefault("hi", {}).update({"Inspec. APK":"APK","Decompilar":"डिकंपाइल","Extrair smali":"Smali","Dependencias":"Deps","Relatorios":"रिपोर्ट","Resultados":"परिणाम","Ver arquivos":"फ़ाइलें","Edicoes":"संपादन","Assinar APK":"साइन APK","Chave APK":"APK कुंजी","Assistente IA":"AI","Idioma":"भाषा","Sair":"बाहर"})
+
 def get_language() -> str:
     return _language
 
