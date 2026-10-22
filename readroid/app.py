@@ -520,6 +520,35 @@ def ai_assistant() -> None:
 
 
 
+
+from wcwidth import wcwidth, wcswidth
+import arabic_reshaper
+from bidi.algorithm import get_display
+
+
+def has_rtl(s):
+    return any("\u0600" <= c <= "\u06ff" or "\u0750" <= c <= "\u077f"
+               or "\u08a0" <= c <= "\u08ff" for c in s)
+
+
+def rtl(s):
+    return get_display(arabic_reshaper.reshape(s))
+
+
+def fit(text, size):
+    out, used = [], 0
+    for ch in str(text):
+        w = max(0, wcwidth(ch))
+        if used + w > size:
+            break
+        out.append(ch)
+        used += w
+    t = "".join(out)
+    if has_rtl(t):
+        t = rtl(t)
+    return t + " " * max(0, size - max(0, wcswidth(t)))
+
+
 def _panel(title: str, items: list[str], panel_width: int,
            color: str) -> list[str]:
     """Desenha um painel de terminal sem dependências externas."""
@@ -530,14 +559,13 @@ def _panel(title: str, items: list[str], panel_width: int,
 
     heading = (" " + title + " ")[:inner]
     out.append(color + "│" + RESET + BOLD +
-               heading.ljust(inner) + RESET + color + "│" + RESET)
+               fit(heading, inner) + RESET + color + "│" + RESET)
     out.append(color + "├" + "─" * inner + "┤" + RESET)
 
     for item in items:
         # Evita linhas longas quebrando o desenho em telas estreitas.
-        item = item[:inner]
         out.append(color + "│" + RESET +
-                   item.ljust(inner) + color + "│" + RESET)
+                   fit(item, inner) + color + "│" + RESET)
 
     out.append(color + bottom + RESET)
     return out
@@ -593,48 +621,85 @@ def _menu_items(compact: bool = False) -> list[str]:
     ]
 
 
+_BORDERLESS = False
+
+
+def _set_borderless(texts):
+    """Árabe/hindi: sem bordas laterais e painéis empilhados."""
+    global _BORDERLESS
+    _BORDERLESS = any(
+        "\u0600" <= c <= "\u08ff" or "\u0900" <= c <= "\u097f"
+        or "\ufb50" <= c <= "\ufeff"
+        for t in texts for c in str(t))
+
+
+def _ed(ch):
+    if not _BORDERLESS:
+        return ch
+    return " " if ch == "│" else "─"
+
+
 def print_menu() -> None:
+    import unicodedata
+
     cols = width()
     gold = "\033[38;5;220m"
     cyan = CYAN
     reset = RESET
+    gap = 2
+
+    def char_width(ch):
+        if unicodedata.combining(ch):
+            return 0
+        if unicodedata.category(ch) in ("Cf", "Mn", "Me"):
+            return 0
+        return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+    left_items = _system_items()
+    right_items = _menu_items(True)
+    _set_borderless(left_items + right_items)
 
     if cols >= 40:
-        gap = 2
         lw = (cols - gap) // 2
         rw = cols - gap - lw
 
         def compact_panel(title, items, panel_width, color):
-            inner = panel_width - 2
-            top = "┌" + "─" * inner + "┐"
-            mid = "├" + "─" * inner + "┤"
-            bottom = "└" + "─" * inner + "┘"
-            lines = [top, mid]
-            heading = title[:inner].center(inner)
-            lines[1] = mid
-            lines = [top, "│" + heading + "│", mid]
-            for item in items:
-                lines.append("│" + item[:inner].ljust(inner) + "│")
-            lines.append(bottom)
+            inner = max(1, panel_width - 2)
+            lines = [
+                _ed("┌") + "─" * inner + _ed("┐"),
+                _ed("│") + fit(title, inner) + _ed("│"),
+                _ed("├") + "─" * inner + _ed("┤"),
+            ]
+            lines.extend(_ed("│") + fit(item, inner) + _ed("│") for item in items)
+            lines.append(_ed("└") + "─" * inner + _ed("┘"))
             return [color + line + reset for line in lines]
 
-        left_items = _system_items()
-        right_items = _menu_items(True)
-
-        left = compact_panel("SISTEMA", left_items, lw, gold)
+        left = compact_panel("SYSTEM", left_items, lw, gold)
         right = compact_panel("MENU", right_items, rw, cyan)
-
         height = max(len(left), len(right))
+
         for i in range(height):
-            a = left[i] if i < len(left) else gold + "│" + " " * (lw - 2) + "│" + reset
-            b = right[i] if i < len(right) else cyan + "│" + " " * (rw - 2) + "│" + reset
-            print(a + " " * gap + b)
+            a = left[i] if i < len(left) else gold + _ed("│") + " " * (lw - 2) + _ed("│") + reset
+            b = right[i] if i < len(right) else cyan + _ed("│") + " " * (rw - 2) + _ed("│") + reset
+            print(a + (f"\x1b[{lw + gap + 1}G" if _BORDERLESS else " " * gap) + b)
     else:
-        for line in _panel("SISTEMA", _system_items(), max(32, cols - 2), gold):
-            print(line)
-        print()
-        for line in _panel("MENU", _menu_items(True), max(32, cols - 2), cyan):
-            print(line)
+        panel_width = max(32, cols - 2)
+        for title, items, color in (
+            ("SYSTEM", left_items, gold),
+            ("MENU", right_items, cyan),
+        ):
+            inner = max(10, panel_width - 2)
+            lines = [
+                _ed("┌") + "─" * inner + _ed("┐"),
+                _ed("│") + fit(title, inner) + _ed("│"),
+                _ed("├") + "─" * inner + _ed("┤"),
+            ]
+            lines.extend(_ed("│") + fit(item, inner) + _ed("│") for item in items)
+            lines.append(_ed("└") + "─" * inner + _ed("┘"))
+            for line in lines:
+                print(color + line + reset)
+            print()
 
     print()
 

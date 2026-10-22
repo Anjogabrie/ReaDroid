@@ -7,3 +7,5 @@ builds/
 *.apk
 *.jks
 .venv/
+*.bak-*
+__pycache__/
