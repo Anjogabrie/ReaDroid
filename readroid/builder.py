@@ -292,5 +292,11 @@ def build_pipeline(decoded_dir: Path, work_dir: Path, keystore: Path, alias: str
 
     say("verificando a assinatura")
     steps["verify"] = verify_apk(to_sign)
+    if steps["verify"]["ok"] is False:
+        # ok=None significa "apksigner não instalado" (verificação pulada), não falha.
+        # Já False é um APK que o apksigner explicitamente reprovou: não pode sair
+        # do pipeline como "pronto para instalar".
+        steps["verify"]["message"] = "A assinatura não foi validada; não instale este APK."
+        return {"ok": False, "steps": steps, "final_apk": None}
     steps["sha256"] = sha256_file(to_sign)
     return {"ok": True, "steps": steps, "final_apk": str(to_sign)}

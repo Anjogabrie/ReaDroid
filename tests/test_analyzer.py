@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from readroid.analyzer import (analyze_manifest, decompile_with_jadx, inspect_apk,
-                               scan_strings, validate_apk)
+from readroid.analyzer import (analyze_manifest, decompile_with_jadx, extension_warning,
+                               inspect_apk, scan_strings, validate_apk)
 from readroid import __version__, axml, builder
 
 
@@ -116,6 +116,15 @@ class AnalyzerTests(unittest.TestCase):
             self.assertEqual(len(result["sha256"]), 64)
             self.assertEqual(result["version"], __version__)
 
+    def test_extension_warning_handles_multi_part_suffixes(self):
+        # "app.apk.1" é um download repetido comum no Android; path.suffix devolveria
+        # apenas ".1" e o aviso seria um falso positivo.
+        for known in ("app.apk", "app.APK", "app.apks", "app.xapk", "app.apk.1"):
+            self.assertIsNone(extension_warning(Path(known)), known)
+        warning = extension_warning(Path("app.zip"))
+        self.assertIsNotNone(warning)
+        self.assertIn(".zip", warning)
+
     def test_scan_strings_filters_package_name_noise(self):
         with tempfile.TemporaryDirectory() as tmp:
             apk = make_apk(Path(tmp))
@@ -192,6 +201,43 @@ class AnalyzerTests(unittest.TestCase):
             self.assertEqual(result["files_generated"], 1)
 
 
+def _fake_pipeline_tools(keystore: Path, verify_rc: int = 0, apksigner: bool = True,
+                         jarsigner: bool = False):
+    """Simula apktool/zipalign/keytool/apksigner para testar o pipeline sem
+    depender dos binários reais (que podem não existir no CI)."""
+    available = {"apktool", "zipalign", "keytool"}
+    if apksigner:
+        available.add("apksigner")
+    if jarsigner:
+        available.add("jarsigner")
+
+    def fake_which(name):
+        return f"/usr/bin/{name}" if name in available else None
+
+    def fake_run(cmd, timeout=180):
+        tool = Path(cmd[0]).name
+        if tool == "apktool":
+            Path(cmd[cmd.index("-o") + 1]).write_bytes(b"PK\x03\x04unsigned")
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+        if tool == "zipalign":
+            Path(cmd[-1]).write_bytes(b"PK\x03\x04aligned")
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+        if tool == "keytool":
+            keystore.write_bytes(b"fake-keystore")
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+        if tool == "apksigner" and cmd[1] == "sign":
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+        if tool == "apksigner" and cmd[1] == "verify":
+            return {"returncode": verify_rc, "stdout": "",
+                    "stderr": "" if verify_rc == 0 else "DOES NOT VERIFY"}
+        if tool == "jarsigner":
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+        return {"returncode": 1, "stdout": "", "stderr": "unexpected"}
+
+    return (patch("readroid.builder.shutil.which", side_effect=fake_which),
+            patch("readroid.builder._run", side_effect=fake_run))
+
+
 class BuilderTests(unittest.TestCase):
     def test_apply_quick_edits(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -249,6 +295,39 @@ class BuilderTests(unittest.TestCase):
             self.assertTrue(Path(result["final_apk"]).is_file())
             self.assertIn('android:debuggable="true"', (decoded / "AndroidManifest.xml").read_text())
             self.assertEqual(result["steps"]["sign"]["scheme"], "v1 + v2 + v3")
+
+    def test_pipeline_fails_when_apksigner_rejects_the_signature(self):
+        """Assinatura reprovada não pode sair do pipeline como 'pronta para instalar'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decoded = root / "decoded"
+            decoded.mkdir()
+            (decoded / "apktool.yml").write_text("version: 2.9.0")
+            keystore = root / "ks.jks"
+            which_patch, run_patch = _fake_pipeline_tools(keystore, verify_rc=1)
+            with which_patch, run_patch:
+                result = builder.build_pipeline(decoded, root / "work", keystore)
+
+            self.assertFalse(result["ok"])
+            self.assertFalse(result["steps"]["verify"]["ok"])
+            self.assertIn("não foi validada", result["steps"]["verify"]["message"])
+            self.assertNotIn("sha256", result["steps"])
+
+    def test_pipeline_allows_skipped_verification_without_apksigner(self):
+        """ok=None em verify significa 'verificação pulada', não falha."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decoded = root / "decoded"
+            decoded.mkdir()
+            (decoded / "apktool.yml").write_text("version: 2.9.0")
+            keystore = root / "ks.jks"
+            which_patch, run_patch = _fake_pipeline_tools(keystore, apksigner=False, jarsigner=True)
+            with which_patch, run_patch:
+                result = builder.build_pipeline(decoded, root / "work", keystore)
+
+            self.assertTrue(result["ok"], result["steps"])
+            self.assertIsNone(result["steps"]["verify"]["ok"])
+            self.assertEqual(result["steps"]["sign"]["tool"], "jarsigner")
 
     def test_rename_package_moves_smali_and_updates_references(self):
         with tempfile.TemporaryDirectory() as tmp:
