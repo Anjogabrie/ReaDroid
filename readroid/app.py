@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import builtins as _builtins
 import re
 import shutil
 import subprocess
@@ -11,6 +12,12 @@ from typing import Callable
 
 from . import __version__
 from .banner import render as render_banner
+from .i18n import LANGUAGES, get_language, set_language, tr
+
+# Translate static and known UI phrases consistently, including messages that
+# include ANSI colors or interpolated paths/counts.
+def print(*args, **kwargs):
+    _builtins.print(*(tr(arg) if isinstance(arg, str) else arg for arg in args), **kwargs)
 from .analyzer import (analyze_manifest, decompile_with_jadx, extension_warning, extract_smali_with_apktool,
                        inspect_apk, scan_strings, write_report)
 from .builder import (DEFAULT_ALIAS, DEFAULT_STOREPASS, QUICK_EDITS, apply_quick_edits, build_pipeline,
@@ -49,8 +56,8 @@ def banner() -> None:
     cols = width()
     for line in render_banner(cols, (GREEN, CYAN, RESET)):
         print(line)
-    print(BOLD + f"v{__version__}" + RESET + CYAN + " · IA opcional · Sem root · Offline por padrão" + RESET)
-    print(DIM + "OffensiveTec" + RESET)
+    print(BOLD + f"v{__version__}" + RESET + CYAN + " · " + tr("IA opcional · Sem root · Offline por padrão") + RESET)
+    print(DIM + "OffensiveTec  |  " + LANGUAGES.get(get_language(), "Português") + RESET)
 
 
 _PASTE_RE = re.compile(r"\x1b\[[0-9;?]*[~a-zA-Z]|\[20[01]~|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"
@@ -66,7 +73,7 @@ def clean_path(raw: str) -> str:
 def safe_input(prompt: str = "") -> str:
     """input() que não derruba o menu com traceback se o terminal fechar (Ctrl+D/Ctrl+C)."""
     try:
-        return input(prompt)
+        return input(tr(prompt))
     except (EOFError, KeyboardInterrupt):
         print()
         return ""
@@ -98,7 +105,7 @@ def ask_apk() -> Path | None:
             continue
     candidates = candidates[:20]
     if candidates:
-        print(CYAN + "APKs encontrados nas pastas comuns:" + RESET)
+        print(CYAN + tr("APKs encontrados nas pastas comuns:") + RESET)
         for index, item in enumerate(candidates, 1):
             try:
                 size_mb = item.stat().st_size / (1024 * 1024)
@@ -106,21 +113,21 @@ def ask_apk() -> Path | None:
             except OSError:
                 print(f" [{index}] {sanitize(item.name)}")
         print(" [P] Informar outro caminho")
-        choice = safe_input("Escolha um APK: ").strip()
+        choice = safe_input(tr("Escolha um APK: ")).strip()
         if choice.lower() != "p":
             try:
                 return candidates[int(choice) - 1]
             except (ValueError, IndexError):
-                print(YELLOW + "Seleção não reconhecida; informe o caminho manualmente." + RESET)
-    raw = clean_path(safe_input("Caminho completo do APK: "))
+                print(YELLOW + tr("Seleção não reconhecida; informe o caminho manualmente.") + RESET)
+    raw = clean_path(safe_input(tr("Caminho completo do APK: ")))
     if not raw:
-        print(YELLOW + "Nenhum arquivo informado." + RESET)
+        print(YELLOW + tr("Nenhum arquivo informado.") + RESET)
         return None
     path = Path(raw).expanduser()
     if not path.is_absolute():
         path = Path.cwd() / path
     if not path.exists() or not path.is_file():
-        print(RED + "Arquivo não encontrado. Dica: execute termux-setup-storage e use ~/storage/shared/Download/app.apk" + RESET)
+        print(RED + tr("Arquivo não encontrado.") + " Dica: execute termux-setup-storage e use ~/storage/shared/Download/app.apk" + RESET)
         print(DIM + f"Caminho lido pelo ReaDroid: {str(path)!r}" + RESET)
         return None
     warning = extension_warning(path)
@@ -144,7 +151,7 @@ def ask_decoded_dir() -> Path | None:
             try:
                 return candidates[int(choice) - 1]
             except (ValueError, IndexError):
-                print(YELLOW + "Seleção não reconhecida; informe o caminho manualmente." + RESET)
+                print(YELLOW + tr("Seleção não reconhecida; informe o caminho manualmente.") + RESET)
     raw = clean_path(safe_input("Caminho da pasta decodificada (saída do Apktool): "))
     if not raw:
         return None
@@ -454,7 +461,7 @@ def rebuild_and_sign() -> None:
             dest = downloads / "ReaDroid" / final.name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(final, dest)
-            print(GREEN + f"Cópia em: {dest}" + RESET)
+            print(GREEN + f"{tr('Cópia em:')} {dest}" + RESET)
         if shutil.which("termux-open") and safe_input("Abrir o instalador do Android agora? (s/N): ").strip().lower() == "s":
             subprocess.run([shutil.which("termux-open"), str(final)], check=False)
     else:
@@ -493,6 +500,7 @@ MENU = [
     ("10", "Edições rápidas e renomear pacote (pré-build)"),
     ("11", "Reconstruir, alinhar e assinar APK"),
     ("12", "Gerenciar chave de assinatura"),
+    ("14", "Idioma / Language / اللغة / भाषा"),
 ]
 
 
@@ -511,12 +519,141 @@ def ai_assistant() -> None:
     ai.run_menu(sys.modules[__name__])
 
 
+
+def _panel(title: str, items: list[str], panel_width: int,
+           color: str) -> list[str]:
+    """Desenha um painel de terminal sem dependências externas."""
+    inner = max(10, panel_width - 2)
+    top = "┌" + "─" * inner + "┐"
+    bottom = "└" + "─" * inner + "┘"
+    out = [color + top + RESET]
+
+    heading = (" " + title + " ")[:inner]
+    out.append(color + "│" + RESET + BOLD +
+               heading.ljust(inner) + RESET + color + "│" + RESET)
+    out.append(color + "├" + "─" * inner + "┤" + RESET)
+
+    for item in items:
+        # Evita linhas longas quebrando o desenho em telas estreitas.
+        item = item[:inner]
+        out.append(color + "│" + RESET +
+                   item.ljust(inner) + color + "│" + RESET)
+
+    out.append(color + bottom + RESET)
+    return out
+
+
+
+def _system_items() -> list[str]:
+    checks = [
+        ("Python", shutil.which("python") is not None),
+        ("Java", shutil.which("java") is not None),
+        ("JADX", shutil.which("jadx") is not None),
+        ("APKtool", shutil.which("apktool") is not None),
+        ("Sign", shutil.which("apksigner") is not None),
+    ]
+    items = [
+        f"Ver: {__version__}",
+        "Android",
+        "Sem root",
+        "Offline",
+        "",
+    ]
+    items.extend(f"{n}:{'OK' if ok else '--'}" for n, ok in checks)
+    items.append(f"IA:{'OK' if ai_available() else '--'}")
+    return items
+
+
+def _menu_items(compact: bool = False) -> list[str]:
+    labels = {
+        "1": "Inspec. APK",
+        "2": "Manifesto",
+        "3": "URLs/IPs",
+        "4": "Decompilar",
+        "5": "Extrair smali",
+        "6": "Dependencias",
+        "7": "Relatorios",
+        "8": "Resultados",
+        "9": "Ver arquivos",
+        "10": "Edicoes",
+        "11": "Assinar APK",
+        "12": "Chave APK",
+        "13": "Assistente IA",
+        "14": "Idioma",
+        "0": "Sair",
+    }
+    keys = [key for key, _ in MENU if key != "14"]
+    if ai_available() and "13" not in keys:
+        keys.append("13")
+    keys.extend(["14", "0"])
+    return [
+        f"{key}:{labels[key]}"
+        for key in keys
+        if key != "13" or ai_available()
+    ]
+
+
 def print_menu() -> None:
-    for key, label in MENU:
-        print(f" [{key}] {label}")
-    if ai_available():
-        print(f" [13] Assistente IA {DIM}(opcional){RESET}")
-    print(" [0] Sair")
+    cols = width()
+    gold = "\033[38;5;220m"
+    cyan = CYAN
+    reset = RESET
+
+    if cols >= 40:
+        gap = 2
+        lw = (cols - gap) // 2
+        rw = cols - gap - lw
+
+        def compact_panel(title, items, panel_width, color):
+            inner = panel_width - 2
+            top = "┌" + "─" * inner + "┐"
+            mid = "├" + "─" * inner + "┤"
+            bottom = "└" + "─" * inner + "┘"
+            lines = [top, mid]
+            heading = title[:inner].center(inner)
+            lines[1] = mid
+            lines = [top, "│" + heading + "│", mid]
+            for item in items:
+                lines.append("│" + item[:inner].ljust(inner) + "│")
+            lines.append(bottom)
+            return [color + line + reset for line in lines]
+
+        left_items = _system_items()
+        right_items = _menu_items(True)
+
+        left = compact_panel("SISTEMA", left_items, lw, gold)
+        right = compact_panel("MENU", right_items, rw, cyan)
+
+        height = max(len(left), len(right))
+        for i in range(height):
+            a = left[i] if i < len(left) else gold + "│" + " " * (lw - 2) + "│" + reset
+            b = right[i] if i < len(right) else cyan + "│" + " " * (rw - 2) + "│" + reset
+            print(a + " " * gap + b)
+    else:
+        for line in _panel("SISTEMA", _system_items(), max(32, cols - 2), gold):
+            print(line)
+        print()
+        for line in _panel("MENU", _menu_items(True), max(32, cols - 2), cyan):
+            print(line)
+
+    print()
+
+def language_menu() -> None:
+    print(CYAN + "\n" + tr("Escolha o idioma:") + RESET)
+    codes = list(LANGUAGES)
+    for index, code in enumerate(codes, 1):
+        current = "  ✓" if code == get_language() else ""
+        print(f" [{index}] {LANGUAGES[code]} ({code}){current}")
+    print(" [0] " + tr("Cancelar"))
+    choice = safe_input("> ").strip()
+    if choice == "0" or not choice:
+        return
+    if choice.isdigit() and 1 <= int(choice) <= len(codes):
+        code = codes[int(choice) - 1]
+        set_language(code)
+        print(f"{GREEN}{tr('Idioma salvo:')} {LANGUAGES[code]}{RESET}")
+    else:
+        print(YELLOW + tr("Opção não reconhecida.") + RESET)
 
 
 def main() -> None:
@@ -526,7 +663,7 @@ def main() -> None:
     while True:
         banner()
         print_menu()
-        choice = safe_input(CYAN + "\nReaDroid > " + RESET).strip()
+        choice = safe_input(CYAN + "\n" + tr("ReaDroid > ") + RESET).strip()
 
         if choice == "1":
             run_action("Inspeção APK", inspect_apk)
@@ -576,10 +713,12 @@ def main() -> None:
             keystore_menu()
         elif choice == "13" and ai_available():
             ai_assistant()
+        elif choice == "14":
+            language_menu()
         elif choice in ("0", ""):
-            print(GREEN + "Até a próxima. ReaDroid encerrado." + RESET)
+            print(GREEN + tr("Até a próxima. ReaDroid encerrado.") + RESET)
             break
         else:
-            print(YELLOW + "Opção não reconhecida." + RESET)
-        if choice != "0":
+            print(YELLOW + tr("Opção não reconhecida.") + RESET)
+        if choice not in ("0", "14"):
             pause()
